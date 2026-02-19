@@ -1,66 +1,84 @@
 pipeline {
-    agent any
+  agent any
 
-    environment {
-        IMAGE = "helloapp"
-        DOCKER_USER = "your-dockerhub-username"
+  tools {
+    // Make sure this name matches the Maven installation name in:
+    // Manage Jenkins → Tools → Maven installations
+    maven 'Maven_3.9.9'
+    // (Optional) If you also want a managed JDK, uncomment and define one in Tools:
+    // jdk 'JDK17'
+  }
+
+  options {
+    timestamps()
+    ansiColor('xterm')
+  }
+
+  environment {
+    // If you plan to build & run a local Docker image (no push)
+    IMAGE_NAME = 'helloappimage'
+    CONTAINER_NAME = 'helloappcont'
+  }
+
+  stages {
+
+    stage('Checkout') {
+      steps {
+        // If the Jenkinsfile is in the same Git repo, this is enough:
+        git 'https://github.com/sirisha-rokkam/hello-java.git'
+      }
     }
 
-    stages {
-
-        stage('Checkout Code') {
-            steps {
-                git branch: 'main', url: 'https://github.com/sirisha-rokkam/hello-java.git'
-            }
-        }
-
-        stage('Maven Build') {
-            steps {
-                sh "mvn clean package"
-            }
-        }
-
-        stage('Docker Build') {
-            steps {
-                sh "docker build -t ${DOCKER_USER}/${IMAGE}:latest ."
-            }
-        }
-
-        stage('Docker Login') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-creds',
-                    usernameVariable: 'USER',
-                    passwordVariable: 'PASS'
-                )]) {
-                    sh "echo ${PASS} | docker login -u ${USER} --password-stdin"
-                }
-            }
-        }
-
-        stage('Push Docker Image') {
-            steps {
-                sh "docker push ${DOCKER_USER}/${IMAGE}:latest"
-            }
-        }
-
-        stage('Deploy Container') {
-            steps {
-                sh """
-                    docker stop helloapp || true
-                    docker rm helloapp || true
-                    docker run -d -p 8080:8080 --name helloapp ${DOCKER_USER}/${IMAGE}:latest
-                """
-            }
-        }
+    stage('Build with Maven') {
+      steps {
+        // Uses the Maven from "tools { maven 'Maven_3.9.9' }"
+        sh 'mvn -B clean package'
+      }
     }
 
-    post {
-        success {
-            echo "Application deployed successfully! 🚀"
-        }
-        failure {
-            echo "Pipeline failed ❌"
-        }
+    stage('Archive JAR') {
+      steps {
+        archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+      }
     }
+
+    // ====== OPTIONAL: Build & run a Docker image locally (no push) ======
+    // Requires a Dockerfile in the repo. Remove these two stages if you
+    // don’t want to containerize the HelloApp.
+    stage('Docker Build (local only)') {
+      when { expression { fileExists('Dockerfile') } }
+      steps {
+        sh 'docker build -t ${IMAGE_NAME}:latest .'
+      }
+    }
+
+    stage('Run Container (local)') {
+      when { expression { fileExists('Dockerfile') } }
+      steps {
+        sh '''
+          docker stop ${CONTAINER_NAME} || true
+          docker rm ${CONTAINER_NAME} || true
+          docker run -d --name ${CONTAINER_NAME} ${IMAGE_NAME}:latest
+        '''
+      }
+    }
+    // ===================================================================
+  }
+
+  post {
+    success {
+      echo '✅ Pipeline completed successfully!'
+    }
+    failure {
+      echo '❌ Pipeline failed.'
+    }
+    always {
+      // If it’s a console app, you can print container logs (optional)
+      script {
+        if (fileExists('Dockerfile')) {
+          sh 'docker logs ${CONTAINER_NAME} || true'
+        }
+      }
+    }
+  }
 }
