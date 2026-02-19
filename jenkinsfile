@@ -9,11 +9,6 @@ pipeline {
     // jdk 'JDK17'
   }
 
-  options {
-    timestamps()
-    ansiColor('xterm')
-  }
-
   environment {
     // If you plan to build & run a local Docker image (no push)
     IMAGE_NAME = 'helloappimage'
